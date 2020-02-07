@@ -1,0 +1,20 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Subscription service - SNS topic
+
+Parameters:
+  AppName:
+    Type: String
+  DeploymentType:
+    Type: String
+
+Resources:
+  SnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${AppName}-${DeploymentType}-subscription
+
+Outputs:
+  SnsTopic:
+    Value: !Ref SnsTopic
+    Export:
+      Name: !Sub ${AppName}-${DeploymentType}-SnsTopic-subscription

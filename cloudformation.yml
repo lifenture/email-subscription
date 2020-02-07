@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Email subscription root stack
+
+Parameters:
+  AppName:
+    Type: String
+  DeploymentType:
+    Type: String
+
+Resources:
+  LambdaLayer: 
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+          AppName: !Ref AppName
+          DeploymentType: !Ref DeploymentType
+      TemplateURL: ./lambda-layer/cloudformation.yml
+  StackSns:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+          AppName: !Ref AppName
+          DeploymentType: !Ref DeploymentType
+      TemplateURL: ./sns/cloudformation.yml
+  StackApi:
+    DependsOn: 
+      - LambdaLayer
+      - StackSns
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+          AppName: !Ref AppName
+          DeploymentType: !Ref DeploymentType
+      TemplateURL: ./api/cloudformation.yml
+  StackSnsAddDb: 
+    DependsOn: StackSns
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        AppName: !Ref AppName
+        DeploymentType: !Ref DeploymentType
+      TemplateURL: ./sns-dynamoDb/cloudformation.yml
+  StackSnsAddMail: 
+    DependsOn: StackSns
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        AppName: !Ref AppName
+        DeploymentType: !Ref DeploymentType
+      TemplateURL: ./sns-ses/cloudformation.yml

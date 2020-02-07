@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Shared resources - lambda layer
+
+Parameters:
+  AppName:
+    Type: String
+  DeploymentType:
+    Type: String
+
+Resources:
+  LambdaLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      CompatibleRuntimes:
+        - nodejs12.x
+      Content: functions/
+      LayerName: !Sub ${AppName}-${DeploymentType}-subscription
+
+Outputs:
+  LambdaLayer:
+    Value: !Ref LambdaLayer
+    Export:
+      Name: !Sub ${AppName}-${DeploymentType}-LambdaLayer-subscription

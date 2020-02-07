@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Subscription service - SNS subscription - Send welcome mail
+
+Parameters:
+  AppName:
+    Type: String
+  DeploymentType:
+    Type: String
+
+Resources:
+  LambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: 
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole     
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - ses:SendRawEmail
+                Effect: Allow
+                Resource: '*'
+          PolicyName: lambda-ses
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - s3:GetObject
+                Effect: Allow
+                Resource:
+                  - !Sub ${ConfigS3Bucket.Arn}/*
+          PolicyName: lambda-s3
+
+  SnsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: lambda
+      Endpoint: !GetAtt LambdaFunction.Arn
+      TopicArn:
+        Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-SnsTopic-subscription
+      FilterPolicy: 
+        event: 
+          - addSubscription
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AppName}-${DeploymentType}-subscriptionAddMail
+      Handler: handler.subscriptionAddMail
+      MemorySize: 256
+      Role: !GetAtt LambdaIAMRole.Arn
+      Runtime: nodejs12.x
+      Timeout: 10
+      Environment:
+        Variables:
+          ConfigBucket: !Ref ConfigS3Bucket
+          ConfigDir: welcome-mail
+          SesConfigSet: MyMail
+      Code: functions/
+      Layers:
+        - Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-LambdaLayer-subscription
+      TracingConfig:
+        Mode: Active
+
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AppName}-${DeploymentType}-subscriptionAddMail
+      RetentionInDays: 14
+
+  LambdaSnsInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-SnsTopic-subscription
+
+  ConfigS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AppName}-${DeploymentType}-config-subscription
+
+Outputs:
+  S3Bucket:
+    Value: !Ref ConfigS3Bucket
+    Export:
+      Name: !Sub ${AppName}-${DeploymentType}-S3Bucket-config-subscription

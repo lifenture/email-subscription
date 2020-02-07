@@ -1,0 +1,235 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Subscription service - API and proxy Lambda
+
+Parameters:
+  AppName:
+    Type: String
+  DeploymentType:
+    Type: String
+  DataFields:
+    Type: String
+    Default: lastName, city
+
+Resources:
+  ApiRoot:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub ${AppName}-${DeploymentType}-subscription
+      MinimumCompressionSize: 1024
+
+### Shared Lambda resources ###
+  LambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: 
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole     
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - sns:Publish
+                Effect: Allow
+                Resource:
+                  - Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-SnsTopic-subscription
+          PolicyName: lambda-sns
+
+### Add subscription ###
+  ApiMethodAdd:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionAdd.Arn}/invocations
+      ResourceId: !GetAtt ApiRoot.RootResourceId
+      RestApiId: !Ref ApiRoot
+
+  LambdaFunctionAdd:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AppName}-${DeploymentType}-subscriptionAdd
+      Handler: handler.subscriptionAdd
+      MemorySize: 128
+      Role: !GetAtt LambdaIAMRole.Arn
+      Runtime: nodejs12.x
+      Timeout: 10
+      Environment:
+        Variables:
+          SnsTopicArn:
+            Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-SnsTopic-subscription
+          DataFields: !Ref DataFields
+      Code: functions/
+      Layers:
+        - Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-LambdaLayer-subscription
+      TracingConfig:
+        Mode: Active
+
+  LambdaLogGroupAdd:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AppName}-${DeploymentType}-subscriptionAdd
+      RetentionInDays: 14
+
+  LambdaApiGatewayInvokeAdd:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunctionAdd.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiRoot}/*/*
+
+### REST resource with path param ###
+  ApiResourceSubscriptionId:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ApiRoot
+      ParentId: !GetAtt ApiRoot.RootResourceId
+      PathPart: "{subscriptionId}"
+
+### Delete subscription ###
+  ApiMethodDelete:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: DELETE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionDelete.Arn}/invocations
+      ResourceId: !Ref ApiResourceSubscriptionId
+      RestApiId: !Ref ApiRoot
+
+  LambdaFunctionDelete:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AppName}-${DeploymentType}-subscriptionDelete
+      Handler: handler.subscriptionDelete
+      MemorySize: 128
+      Role: !GetAtt LambdaIAMRole.Arn
+      Runtime: nodejs12.x
+      Timeout: 10
+      Environment:
+        Variables:
+          SnsTopicArn:
+            Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-SnsTopic-subscription
+      Code: functions/
+      Layers:
+        - Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-LambdaLayer-subscription
+      TracingConfig:
+        Mode: Active
+
+  LambdaLogGroupDelete:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AppName}-${DeploymentType}-subscriptionDelete
+      RetentionInDays: 14
+
+  LambdaApiGatewayInvokeDelete:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunctionDelete.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiRoot}/*/*
+
+### "CORS" methods ###
+  ApiMethodOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+        IntegrationResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+            method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+          ResponseTemplates:
+            application/json: ''
+        PassthroughBehavior: NEVER
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+      ResourceId: !GetAtt ApiRoot.RootResourceId
+      RestApiId: !Ref ApiRoot
+
+  ApiMethodOptionsSubscriptionId:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+        IntegrationResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+            method.response.header.Access-Control-Allow-Methods: "'GET,PUT,DELETE,OPTIONS'"
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+          ResponseTemplates:
+            application/json: ''
+        PassthroughBehavior: NEVER
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+      ResourceId: !Ref ApiResourceSubscriptionId
+      RestApiId: !Ref ApiRoot
+
+  ApiDeployment:
+    DependsOn: 
+      - ApiMethodAdd
+      - ApiMethodDelete
+      - ApiMethodOptions
+      - ApiMethodOptionsSubscriptionId
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref ApiRoot
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref ApiRoot
+      StageName: !Ref DeploymentType
+      DeploymentId: !Ref ApiDeployment
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: /*
+          HttpMethod: '*'
+          LoggingLevel: 'OFF'
+          ThrottlingRateLimit: 2
+          ThrottlingBurstLimit: 5
+
+Outputs:
+  ApiGatewayUrl:
+    Value: !Sub https://${ApiRoot}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${DeploymentType}
+    Export:
+      Name: !Sub ${AppName}-${DeploymentType}-ApiGatewayUrl-subscription

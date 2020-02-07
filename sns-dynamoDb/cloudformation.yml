@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Subscription service - SNS subscription - Save to DB
+
+Parameters:
+  AppName:
+    Type: String
+  DeploymentType:
+    Type: String
+
+Resources:
+  LambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: 
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Scan
+                  - dynamodb:DeleteItem
+                Resource: 
+                  - !GetAtt DynamoDbTable.Arn
+          PolicyName: lambda-db-add
+
+  SnsSubscriptionAdd:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: lambda
+      Endpoint: !GetAtt LambdaFunctionAdd.Arn
+      TopicArn:
+        Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-SnsTopic-subscription
+      FilterPolicy: 
+        event: 
+          - addSubscription
+
+  LambdaFunctionAdd:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AppName}-${DeploymentType}-subscriptionAddDb
+      Handler: handler.subscriptionAddDb
+      MemorySize: 128
+      Role: !GetAtt LambdaIAMRole.Arn
+      Runtime: nodejs12.x
+      Timeout: 10
+      Environment:
+        Variables:
+          dynamoDbTable: !Ref DynamoDbTable
+      Code: functions/
+      Layers:
+        - Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-LambdaLayer-subscription
+      TracingConfig:
+        Mode: Active
+
+  LambdaLogGroupAdd:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AppName}-${DeploymentType}-subscriptionAddDb
+      RetentionInDays: 14
+
+  LambdaSnsInvokeAdd:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunctionAdd.Arn
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-SnsTopic-subscription
+
+  SnsSubscriptionDelete:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: lambda
+      Endpoint: !GetAtt LambdaFunctionDelete.Arn
+      TopicArn:
+        Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-SnsTopic-subscription
+      FilterPolicy:
+        event: 
+          - deleteSubscription
+
+  LambdaFunctionDelete:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AppName}-${DeploymentType}-subscriptionDeleteDb
+      Handler: handler.subscriptionDeleteDb
+      MemorySize: 128
+      Role: !GetAtt LambdaIAMRole.Arn
+      Runtime: nodejs12.x
+      Timeout: 10
+      Environment:
+        Variables:
+          dynamoDbTable: !Ref DynamoDbTable
+      Code: functions/
+      Layers:
+        - Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-LambdaLayer-subscription
+      TracingConfig:
+        Mode: Active
+
+  LambdaLogGroupDelete:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AppName}-${DeploymentType}-subscriptionDeleteDb
+      RetentionInDays: 14
+
+  LambdaSnsInvokeDelete:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunctionDelete.Arn
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Fn::ImportValue: !Sub ${AppName}-${DeploymentType}-SnsTopic-subscription
+
+  DynamoDbTable:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Delete
+      Properties:
+        TableName: !Sub ${AppName}-${DeploymentType}-subscriptions
+        AttributeDefinitions:
+          - AttributeName: email
+            AttributeType: S
+        KeySchema: 
+          - AttributeName: email
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        PointInTimeRecoverySpecification: 
+            PointInTimeRecoveryEnabled: false
+
+Outputs:
+  DynamoDb:
+    Value: !Ref DynamoDbTable
+    Export:
+      Name: !Sub ${AppName}-${DeploymentType}-DynamoDb-subscription

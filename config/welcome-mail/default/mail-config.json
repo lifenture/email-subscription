@@ -1,0 +1,6 @@
+{
+  "from": "\"Here goes sender email\"<sender@your-domain.qwe>",
+  "subject": "🤝 Welcome {{firstName}}!",
+  "bodyFileName": "template.html",
+  "attachments":[{ "filename": "images/szanti.png" }]
+}
